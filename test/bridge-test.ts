@@ -115,14 +115,17 @@ describe("Cross chain Bridge test", () => {
   it("STEP 5: Check requires for addPool function", async function () {
     try {
       await Bridge_ETH.connect(user1).addPool(USDT_ETH.address);
+      console.log("Should not pass!!!!")
     } catch (error) { expect(error.message).to.include("Ownable: caller is not the owner") }
 
     try {
       await Bridge_ETH.connect(owner).addPool(user1.address);
+      console.log("Should not pass!!!!")
     } catch (error) { expect(error.message).to.include("Bridge: Invalid token address") }
 
     try {
       await Bridge_ETH.connect(owner).addPool(USDT_ETH.address);
+      console.log("Should not pass!!!!")
     } catch (error) { expect(error.message).to.include("Bridge: The token is already registered") }
   });
 
@@ -238,6 +241,7 @@ describe("Cross chain Bridge test", () => {
         USDT_BSC.address,
         2
       );
+      console.log("Should not pass!!!!")
     } catch (error) { expect(error.message).to.include("Bridge: swap is not empty state or duplicate secret") }
 
     try {
@@ -249,6 +253,7 @@ describe("Cross chain Bridge test", () => {
         USDT_BSC.address,
         2
       );
+      console.log("Should not pass!!!!")
     } catch (error) { expect(error.message).to.include("Bridge: liquidity pool is not registered") }
   });
 
@@ -294,7 +299,176 @@ describe("Cross chain Bridge test", () => {
       s
     )
 
-    console.log(await USDT_BSC.balanceOf(user3.address))
+    expect(await USDT_BSC.balanceOf(user3.address)).to.equal(amount * 0.98)
+    expect(await (await Bridge_BSC.swaps(message)).state).to.equal(2) // 0 - empty, 1 active, 2 - redeemed
 
+  });
+
+  it("STEP 12: Should revert if swap is already redeemed", async function () {
+    let transaction_number = "27d19c94-553c-4986-a9d3-0250d398584e";
+    let amount = 100_000000;
+    let chainTo = 2;
+    let recipient = user3.address;
+
+    let message = ethers.utils.arrayify(ethers.utils.solidityKeccak256(
+      [
+        "string",
+        "uint256",
+        "address",
+        "address",
+        "address",
+        "uint256"
+      ],
+      [
+        transaction_number,
+        amount,
+        USDT_ETH.address,
+        USDT_BSC.address,
+        recipient,
+        chainTo
+      ]
+    ));
+
+    let signature = await validator.signMessage(message);
+    let { v, r, s } = ethers.utils.splitSignature(signature);
+
+    try {
+      await Bridge_BSC.connect(user3).redeem(
+        user3.address,
+        user2.address,
+        transaction_number,
+        amount,
+        USDT_ETH.address,
+        USDT_BSC.address,
+        chainTo,
+        v,
+        r,
+        s
+      )
+      console.log("Should not pass!!!!")
+    } catch (error) { expect(error.message).to.include("Bridge: swap is not empty state or duplicate secret") }
+  });
+
+  it("STEP 13: Should revert if the provided message was not signed by the validator", async function () {
+    let transaction_number = "27d19c94-553c-4986-a9d3-0250d398584e";
+    let amount = 200_000000;
+    let chainTo = 2;
+    let recipient = user3.address;
+    let message = ethers.utils.arrayify(ethers.utils.solidityKeccak256(
+      [
+        "string",
+        "uint256",
+        "address",
+        "address",
+        "address",
+        "uint256"
+      ],
+      [
+        transaction_number,
+        amount,
+        USDT_ETH.address,
+        USDT_BSC.address,
+        recipient,
+        chainTo
+      ]
+    ));
+
+    let signature = await user2.signMessage(message);
+    let { v, r, s } = ethers.utils.splitSignature(signature);
+
+    try {
+      await Bridge_BSC.connect(user3).redeem(
+        user3.address,
+        user2.address,
+        transaction_number,
+        amount,
+        USDT_ETH.address,
+        USDT_BSC.address,
+        chainTo,
+        v,
+        r,
+        s
+      )
+      console.log("Should not pass!!!!")
+    } catch (error) {
+      expect(error.message).to.include("Bridge: validator address is invalid")
+    }
+  })
+
+  it("STEP 14: Should revert if there is no liquidity pool for the given destination tokens", async function () {
+    let transaction_number = "27d19c94-553c-4986-a9d3-0250d398584e";
+    let amount = 20000_000000;
+    let chainTo = 2;
+    let recipient = user3.address;
+    let message = ethers.utils.arrayify(ethers.utils.solidityKeccak256(
+      [
+        "string",
+        "uint256",
+        "address",
+        "address",
+        "address",
+        "uint256"
+      ],
+      [
+        transaction_number,
+        amount,
+        USDT_ETH.address,
+        USDT_BSC.address,
+        recipient,
+        chainTo
+      ]
+    ));
+
+    let signature = await validator.signMessage(message);
+    let { v, r, s } = ethers.utils.splitSignature(signature);
+
+    try {
+      await Bridge_BSC.connect(user3).redeem(
+        user3.address,
+        user2.address,
+        transaction_number,
+        amount,
+        USDT_ETH.address,
+        USDT_BSC.address,
+        chainTo,
+        v,
+        r,
+        s
+      )
+
+      console.log("Should not pass!!!!")
+    } catch (error) {
+      expect(error.message).to.include("Bridge: not enough balance in pool")
+    }
+  })
+
+  it("STEP 15: Check removeLiquidity requires", async function () {
+    try {
+      await USDT_ETH_Pool.connect(user3).removeLiquidity(1000);
+      console.log("Should not pass!!!!")
+    } catch (error) {
+      expect(error.message).to.include("Pool: sender is not a liquidity provider")
+    }
+
+    try {
+      await USDT_ETH_Pool.connect(user1).removeLiquidity(1000);
+      console.log("Should not pass!!!!")
+    } catch (error) {
+      expect(error.message).to.include("Pool: Tokens are not yet available for withdrawal")
+    }
+
+    ethers.provider.send("evm_increaseTime", [100])
+    ethers.provider.send("evm_mine", [])
+
+    try {
+      await USDT_ETH_Pool.connect(user1).removeLiquidity(5000_000000);
+      console.log("Should not pass!!!!")
+    } catch (error) {
+      expect(error.message).to.include("Pool: not enough token to remove")
+    }
+  });
+
+  it("STEP 16: Should remove given amount of tokens plus accrued fees", async function () {
+    await USDT_ETH_Pool.connect(user1).removeLiquidity(50_000000);
   });
 })
